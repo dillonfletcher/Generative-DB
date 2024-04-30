@@ -1,0 +1,55 @@
+{
+	"name": "ab-generative-db",
+	"displayName": "AB-Generative-DB",
+	"description": "Uses generative AI to help generate database queries for using AllianceBernstein database schema.",
+	"publisher": "AllianceBernstein",
+	"version": "0.0.1",
+	"engines": {
+		"vscode": "^1.39.0",
+		"azdata": "*"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onCommand:ab-generative-db.showCurrentConnection",
+		"onCommand:ab-generative-db.generateQuery"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "ab-generative-db.generateQuery",
+				"title": "Use ChatGpt to Generate Query"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"lint": "eslint src --ext ts",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile && npm run lint",
+		"test": "node ./out/test/runTest.js",
+		"proposedapi": "node installTypings.js"
+	},
+	"devDependencies": {
+		"@types/azdata": "*",
+		"@types/glob": "^7.1.4",
+		"@types/json2md": "^1.5.4",
+		"@types/mocha": "^9.0.0",
+		"@types/node": "^13.11.0",
+		"@types/vscode": "^1.39.0",
+		"@typescript-eslint/eslint-plugin": "^2.30.0",
+		"@typescript-eslint/parser": "^2.30.0",
+		"azdata-test": "^1.x",
+		"eslint": "^6.8.0",
+		"glob": "^7.1.7",
+		"mocha": "^9.1.0",
+		"typescript": "^4.3.5"
+	},
+	"dependencies": {
+		"json2md": "^2.0.1",
+		"openai": "^4.38.5"
+	}
+}
