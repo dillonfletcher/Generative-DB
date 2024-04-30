@@ -293,7 +293,7 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine('Starting generation of SQL query...\n');
 
             // Get the current DB connection
-            let connectionAndProcessInfo = await getCurrentDBConnectionAndProccesURI();
+            let connectionAndProcessInfo = await getCurrentDBConnectionAndProcessURI();
 
             outputChannel.appendLine(`Current connection and process info:\n${JSON.stringify(connectionAndProcessInfo)})\n`);
 
