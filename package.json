@@ -1,8 +1,8 @@
 {
 	"name": "ab-generative-db",
 	"displayName": "AB-Generative-DB",
-	"description": "Uses generative AI to help generate database queries for using AllianceBernstein database schema.",
-	"publisher": "AllianceBernstein",
+	"description": "Uses generative AI to help generate database queries the currently connected database schema.",
+	"publisher": "DillonFletcher",
 	"version": "0.0.1",
 	"engines": {
 		"vscode": "^1.39.0",
@@ -12,14 +12,13 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:ab-generative-db.showCurrentConnection",
-		"onCommand:ab-generative-db.generateQuery"
+		"onCommand:agenerative-db.generateQuery"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "ab-generative-db.generateQuery",
+				"command": "generative-db.generateQuery",
 				"title": "Use ChatGpt to Generate Query"
 			}
 		]
