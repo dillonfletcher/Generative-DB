@@ -110,7 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return thread;
         };
 
-        const getCurrentDBConnectionAndProccesURI = async (): Promise<{connection: azdata.connection.ConnectionProfile, currentProcessURI: string}> => {
+        const getCurrentDBConnectionAndProcessURI = async (): Promise<{connection: azdata.connection.ConnectionProfile, currentProcessURI: string}> => {
             if (!_currentConnection) {
                 _currentConnection = await azdata.connection.getCurrentConnection();
             }
