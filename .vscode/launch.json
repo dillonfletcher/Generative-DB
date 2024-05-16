@@ -22,8 +22,7 @@
             "outFiles": [
                 "${workspaceFolder}/out/**/*.js"
             ],
-            "preLaunchTask": "npm: watch",
-            "timeout": 30000
+            "preLaunchTask": "Debug Extension",
         },
         {
             "name": "Extension Tests",
@@ -37,8 +36,7 @@
             "outFiles": [
                 "${workspaceFolder}/out/test/**/*.js"
             ],
-            "preLaunchTask": "npm: watch",
-            "timeout": 30000
+            "preLaunchTask": "Debug Extension",
         }
     ]
 }

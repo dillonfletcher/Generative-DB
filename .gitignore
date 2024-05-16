@@ -2,3 +2,7 @@ out
 node_modules
 .ads-test/
 *.vsix
+.DS_Store
+.env
+tsconfig.json
+.idea/

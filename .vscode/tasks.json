@@ -15,6 +15,22 @@
 				"kind": "build",
 				"isDefault": true
 			}
+		},
+		{
+			"type": "shell",
+			"label": "Copy Env File",
+			"command": "cp",
+			"args": [
+				".env",
+				"./out/.env"
+			],
+		},
+		{
+			"label": "Debug Extension",
+			"dependsOn": [
+				"Copy Env File",
+				"watch"
+			],
 		}
 	]
 }

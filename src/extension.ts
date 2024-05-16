@@ -1,4 +1,7 @@
 'use strict';
+// Setup dotnetenv
+import * as dotenv from 'dotenv';
+
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
@@ -16,21 +19,30 @@ import { MessageCreateParams, TextContentBlock } from 'openai/resources/beta/thr
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+    // Load environment variables
+    dotenv.config({ path: __dirname + '/.env'});
 
     // Use the console to output diagnostic information (console.log) and errors (console.error)
     // This line of code will only be executed once when your extension is activated
     console.log('The extension "generative-db" is now active!');
 
-    context.subscriptions.push(vscode.commands.registerCommand('ab-generative-db.generateQuery', () => {
+    context.subscriptions.push(vscode.commands.registerCommand('generative-db.generateQuery', () => {
+        // GPT Variables
         let gptAPIKey: string | undefined;
-        let gptBaseURL: string | undefined;
-        const assistantName: string = 'MSSQL Query Writer';
+        let gptAPIBaseURL: string | undefined;
+        let assistantName: string = 'MSSQL Query Writer';
+        let assistantModel: string = 'gpt-4';
+        let assistantDescription: string = 'Generates SQL queries based on user input and database schema.';
+        let assistantPrompt: string = 'Please write a SQL query using the following database table rows. Please make sure to use the fully qualified name, including schema, for all database tables that are not under the default schema of dbo. Do not explain the query only provide the code.';
+        let assistantTemperature: number | null = 0; // 0 is deterministic, 2 is random
         const outputChannelName: string = 'AB Generative DB';
+        const schemaRefreshInterval: number = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
 
         let _outputChannel: vscode.OutputChannel; // Output channel
         let _client: OpenAI; // OpenAI client
         let _thread: OpenAI.Beta.Threads.Thread; // OpenAI thread
         let _allSchemaMarkdown: string; // Schema for all databases
+        let _allSchemaMarkdownTimestamp: Date; // Timestamp of when the schema was last refreshed
         let _allSchemaMarkdownConnectionId: string; // The connectionID that the schema was generated for
         let _currentConnection: azdata.connection.ConnectionProfile; // Current DB connection
         let _currentProcessURI: string; // Current process URI
@@ -54,8 +66,8 @@ export function activate(context: vscode.ExtensionContext) {
                 return _client;
             }
 
-            if (!gptBaseURL && process.env.GPT_BASE_URL) {
-                gptBaseURL = process.env.GPT_BASE_URL;
+            if (!gptAPIBaseURL && process.env.GPT_BASE_URL) {
+                gptAPIBaseURL = process.env.GPT_BASE_URL;
             }
 
             if (!gptAPIKey) {
@@ -66,7 +78,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            let client = new OpenAI({apiKey: gptAPIKey});
+            let client = new OpenAI({apiKey: gptAPIKey, baseURL: gptAPIBaseURL});
             if (!client) {
                 throw new Error('Could not setup OpenAI client.');
             }
@@ -83,11 +95,21 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
 
+            if (!foundAssistant) {
+                let assistantCreateParams: OpenAI.Beta.Assistants.AssistantCreateParams = {
+                    name: assistantName,
+                    description: 'Generates SQL queries based on user input and database schema.',
+                    model: 'gpt-4o',
+                    temperature: 0,
+                };
+                foundAssistant = await client.beta.assistants.create(assistantCreateParams);
+            }
+
             if (foundAssistant) {
-                console.log(`Found assistant '${assistantName}'.`);
+                console.log(`Created assistant '${assistantName}'.`);
                 return foundAssistant;
             } else {
-                throw new Error(`Assistant '${assistantName}' not found.`);
+                throw new Error(`Assistant '${assistantName}' not found and could not be created.`);
             }
         };
 
@@ -95,12 +117,12 @@ export function activate(context: vscode.ExtensionContext) {
             if (_thread) {
                 return _thread;
             }
-
+            
             const threadCreateParams: OpenAI.Beta.Threads.ThreadCreateParams = {
                     messages: [
                         {
                             role: "assistant",
-                            content: `Please write a SQL query using the following database table rows. Please make sure to use the fully qualified name, including schema, for all database tables that are not under the default schema of dbo. Do not explain the query only provide the code. \n Database Rows: \n ${schema} \n \n `,
+                            content: `${assistantPrompt}\n Database Rows: \n ${schema} \n \n `,
                             
                         }
                     ]
@@ -178,7 +200,15 @@ export function activate(context: vscode.ExtensionContext) {
         };
 
         const getSchemaMarkdownForAllDatabases = async (connection: azdata.connection.ConnectionProfile): Promise<string> => {
-            if (_allSchemaMarkdown && _currentConnection && _currentConnection.connectionId === _allSchemaMarkdownConnectionId) {
+            // get ms since date
+            let now = new Date();
+            let msSinceLastRefresh = now.getTime() - (_allSchemaMarkdownTimestamp?.getTime() ?? 0);
+
+            if (_allSchemaMarkdown &&
+                msSinceLastRefresh > schemaRefreshInterval &&
+                _currentConnection &&
+                _currentConnection.connectionId === _allSchemaMarkdownConnectionId) {
+                _outputChannel?.appendLine('Using cached schema.\n');
                 return _allSchemaMarkdown;
             }
 
@@ -223,8 +253,8 @@ export function activate(context: vscode.ExtensionContext) {
                     // Get the completion from the first message and check that it is TextContentBlock
                     let completion = (messages.data[0].content[0] as TextContentBlock).text.value;
                     console.log(`Completion: ${completion}`);
-                    // let strippedCompletion = completion.replace(/^\s*```sql\n|\n```$/g, '');
-                    return completion;
+                    let strippedCompletion = completion.replace(/^\s*```sql\n|\n```$/g, '');
+                    return strippedCompletion;
                 } else {
                     throw new Error('Could not get completion from OpenAI.');
                 }
