@@ -25,7 +25,7 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./ | cp ./.env ./out/.env",
+		"compile": "mkdir -p ./out | tsc -p ./ | cp ./.env ./out/.env",
 		"lint": "eslint src --ext ts",
 		"watch": "tsc -watch -p ./",
 		"pretest": "npm run compile && npm run lint",
@@ -51,6 +51,8 @@
 		"dotenv": "^16.4.5",
 		"json2md": "^2.0.1",
 		"langchain": "^0.1.37",
-		"openai": "^4.38.5"
+		"mssql": "^10.0.2",
+		"openai": "^4.38.5",
+		"typeorm": "^0.3.20"
 	}
 }
