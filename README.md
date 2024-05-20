@@ -7,31 +7,36 @@
 
 2) Make sure to run ```npm i``` on the project root
 
-3) Add the following ENV variables to the launch. json:
+3) To  configure the tool create a .env file in the root of the project with the following content:
     ```
-        "env": {
-            "GPT_BASE_URL" :
-            "**INSERT GPT API ENDPOINT URL HERE**",
-            "GPT _API_KEY": "**INSERT GPT API KEY HERE**",
-        }
+   # .env
+   DEBUG=true
+   
+   #Database Settings
+   DB_HOSTNAME=""
+   DB_PORT=1433
+   DB_USERNAME=""
+   DB_PASSWORD=""
+   DB_CATALOG=""
+   
+   # Assistant Settings
+   GPT_MODEL_VERSION="gpt-3.5-turbo-0125"
+   GPT_TEMPERATURE=0
+   
+   # OpenAI Settings
+   OPENAI_API_KEY=""
+   
+   # To use with Azure you should have AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_INSTANCE_NAME, AZURE_OPENAI_API_DEPLOYMENT_NAME
+   # and AZURE_OPENAI_API_VERSION environment variable set.AZURE_OPENAI_BASE_PATH is optional and will override AZURE_OPENAI_API_INSTANCE_NAME
+   # AZURE_OPENAI_API_KEY=
+   # AZURE_OPENAI_API_INSTANCE_NAME=
+   # AZURE_OPENAI_API_DEPLOYMENT_NAME=
+   # AZURE_OPENAI_API_VERSION=
+   # AZURE_OPENAI_BASE_PATH=
+   
+   # Langchain/Langsmith
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_ENDPOINT=""
+   LANGCHAIN_API_KEY=""
+   LANGCHAIN_PROJECT=""
     ```
-
-4) Set up an assistant with the following properties:
-
-    Assistant Name: ```MSSQL Query Writer```
-
-#### Instructions:
-    You are a database software engineer that writes queries that conform to the following rules:
-    1) Gather all of the data requested by the user.
-    2) All queries will be returned in Microsoft SQL (MSSQL) dialect.
-    3) Do not make up database columns, functions, procedures, or tables if they do not exist in the schema provided in the system prompt.
-    4) If a query cannot be generated that satisfies the users request then do not return a completion.
-    5) Always make sure to include the fully qualified table, function, and procedure names when they are not part of default schema of dbo.
-    6) Use table aliases to keep the code clean and legible.
-    7) When using string agg in a returned query and the field that is being aggregated is not of type NVARCHAR(MAX) then make sure to cast the data to be of type
-    NVARCHAR(MAX) to prevent LOB errors.
-    8) All returned CTEs need to have a ; prefixed before them to ensure they run correctly. 
-
-##### Deployment/Model: ```gpt-4o```
-
-##### Functions: ```Code Interpreter```
