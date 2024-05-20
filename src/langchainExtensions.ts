@@ -6,9 +6,6 @@ import {SqlDatabase, SqlDatabaseDataSourceParams} from 'langchain/sql_db';
 import {InfoSqlTool, ListTablesSqlTool, QueryCheckerTool, QuerySqlTool} from "langchain/tools/sql";
 import {SqlColumn, SqlTable} from "langchain/dist/util/sql_utils";
 import type {DataSource} from "typeorm";
-import { Tool } from "@langchain/core/tools";
-import {PromptTemplate} from "@langchain/core/prompts";
-import {OpenAI} from "@langchain/openai";
 import {LLMChain} from "langchain/chains";
 
 export class QuerySqlToolWithCleanup extends QuerySqlTool {
@@ -23,7 +20,10 @@ export class QuerySqlToolWithCleanup extends QuerySqlTool {
     async _call(input: string) {
         try {
             let cleanedInput = input.replace(/^\s*```(sql)?\n|\n```$/g, '');
-            return await this.db.run(cleanedInput);
+            let returnedData = await this.db.run(cleanedInput);
+            return `SQL QUERY: ${cleanedInput}
+
+RESULT: ${returnedData}`;
         }
         catch (error) {
             return `${error}`;
@@ -412,5 +412,6 @@ You MUST double check your query before executing it. If you get an error while 
 
 DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
 
-If the question does not seem related to the database, just return "I don't know" as the answer.`;
+If there is an answer please INCLUDE THE ANSWER DATA and PROVIDE THE SQL QUERY that was generated to gather the result in your response.
 
+If the question does not seem related to the database, just return "I don't know" as the answer.`;
