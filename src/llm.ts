@@ -9,7 +9,7 @@ import {SqlServerConnectionOptions} from 'typeorm/driver/sqlserver/SqlServerConn
 import {createSqlAgent } from "langchain/agents/toolkits/sql";
 import {ChatPromptTemplate} from "langchain/prompts";
 import {printOutput} from "./helpers";
-import {MSSQL_PREFIX, MsSqlDatabase, MsSqlToolkit} from "./langchainExtensions";
+import {MSSQL_PREFIX, MssqlDatabase, MsSqlToolkit} from "./langchainExtensions";
 
 export abstract class Llm {
     
@@ -81,7 +81,7 @@ export abstract class Llm {
         );
         
         // Create a database connection
-        const db = await MsSqlDatabase.fromDataSourceParams({
+        const db = await MssqlDatabase.fromDataSourceParams({
             appDataSource: datasource,
         });
 
@@ -96,22 +96,10 @@ export abstract class Llm {
         )
         sqlAgent.lc_kwargs = { return_intermediate_steps: true }; // Don't just return the answer, also return the intermediate steps
         sqlAgent.maxIterations = 15; // Set max iterations to limit cost
-
-
-        // const summarizationPrompt = ChatPromptTemplate.fromMessages([
-        //     [
-        //         "system",
-        //     `You are an expert extraction algorithm.
-        //     Only extract relevant information from the text. 
-        //     If you do not know the value of an attribute asked to extract, return null for the attribute's value.`],
-        //     ["human", "{textToSummarize}"],
-        // ]);
-        //
-        // let fullChain = sqlAgent.pipe(summarizationPrompt);
         
         let response= await sqlAgent.invoke({ input: userInput.query }, { });
        
-        printOutput(`GPT Completion:\n${response.intermediateSteps.slice(-1)[0].observation}\n`);
+        printOutput(`====GPT COMPLETION====\n${response.intermediateSteps.slice(-1)[0].observation}\n`);
 
         // printOutput('SQL query sent to editor.\n');
         printOutput('...SQL query generation complete.\n');
@@ -121,4 +109,14 @@ export abstract class Llm {
 dotenv.config({ path: __dirname + '/.env'});
 
 // noinspection JSIgnoredPromiseFromCall
-Llm.RunModelAsync('Please give me a list of all of the customers, how many much money they spent total, and a comma seperated list with the name of each product they bought. Order the results by descending total amount spent.');
+// Llm.RunModelAsync('What is the most sold product? How much has it sold?');
+// Llm.RunModelAsync('What client received the heaviest shipment in 2008?');
+// Llm.RunModelAsync("Are there any products that haven't sold? If so, what are they?");
+// Llm.RunModelAsync("What is the total number of products sold?");
+// Llm.RunModelAsync("What is the total amount of money earned from sales?");
+// Llm.RunModelAsync("Please give me all sales data that might be relevant to a presentation to decide which products we should discontinue selling.");
+
+Llm.RunModelAsync("Please give me all the useful information about customers, their orders, and the total order amount, along with some additional details. Please write the query using as many advanced SQL features as possible including CTEs, window functions, subqueries, and string functions.");
+// Llm.RunModelAsync("Please give me a list of all orders that where shipped to shopping malls.");
+// Llm.RunModelAsync("Please me all useful order information for orders placed outside of the United States.");
+// Llm.RunModelAsync("Please give me all orders that include bicycle handlebars.");

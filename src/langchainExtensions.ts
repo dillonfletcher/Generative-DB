@@ -4,7 +4,10 @@ import {BaseLanguageModelCallOptions, BaseLanguageModelInterface} from '@langcha
 import {SqlToolkit} from "langchain/agents/toolkits/sql";
 import {SqlDatabase, SqlDatabaseDataSourceParams} from 'langchain/sql_db';
 import {InfoSqlTool, ListTablesSqlTool, QueryCheckerTool, QuerySqlTool} from "langchain/tools/sql";
-import {SqlColumn, SqlTable} from "langchain/dist/util/sql_utils";
+import {
+    SqlColumn,
+    SqlTable
+} from "langchain/dist/util/sql_utils";
 import type {DataSource} from "typeorm";
 import {LLMChain} from "langchain/chains";
 
@@ -21,9 +24,11 @@ export class QuerySqlToolWithCleanup extends QuerySqlTool {
         try {
             let cleanedInput = input.replace(/^\s*```(sql)?\n|\n```$/g, '');
             let returnedData = await this.db.run(cleanedInput);
-            return `SQL QUERY: ${cleanedInput}
+            return `SQL QUERY:
+${cleanedInput}
 
-RESULT: ${returnedData}`;
+RESULT:
+${returnedData}`;
         }
         catch (error) {
             return `${error}`;
@@ -54,29 +59,37 @@ export const generateTableInfoFromTables = async (tables: Array<SqlTableWithSche
     }
     let globalString = "";
     for (const currentTable of tables) {
-        // Add the custom info of the table
-        const tableCustomDescription = customDescription &&
-        Object.keys(customDescription).includes(currentTable.tableName)
-            ? `${customDescription[currentTable.tableName]}\n`
-            : "";
-        // Add the creation of the table in SQL
-        let schema = null;
-        if (appDataSource.options.type === "postgres") {
-            schema = appDataSource.options?.schema ?? "public";
+        if (appDataSource.options.type !== "mssql") {
+            throw new Error("Only mssql is currently supported");
         }
-        else if (appDataSource.options.type === "mssql") {
-            schema = appDataSource.options?.schema;
+
+        // If a custom description is provided, use it, else get the description from the database
+        let tableCustomDescription;
+        if (customDescription &&
+            Object.keys(customDescription).includes(currentTable.tableName)) {
+            tableCustomDescription = `${customDescription[currentTable.tableName]}\n`
+        } else {
+            try {
+                const sqlSelectTableDescriptionQuery = `SELECT value
+FROM sys.extended_properties
+WHERE [name] = 'MS_Description'
+AND minor_id = 0
+AND major_id = OBJECT_ID('${currentTable.tableSchema}.${currentTable.tableName}');`;
+                
+                let tableDescriptionResult = await appDataSource.query(sqlSelectTableDescriptionQuery);
+                // Check if the result is blank??
+                tableCustomDescription = tableDescriptionResult.length > 0 ? `${tableDescriptionResult[0].value}\n` : "";
+            } catch (error) {
+                tableCustomDescription = "";
+                // If the request fails we catch it and only display a log message
+                console.log(error);
+            }
         }
-        else if (appDataSource.options.type === "sap") {
-            schema =
-                appDataSource.options?.schema ??
-                appDataSource.options?.username ??
-                "public";
-        }
-        else if (appDataSource.options.type === "oracle") {
-            schema = appDataSource.options.schema;
-        }
+
+        // Generate create table query --studies show that the highest performance is obtained providing the tables in this format
+        let schema = appDataSource.options?.schema;
         schema = currentTable.tableSchema ?? schema; // Use the tables schema if it exists, else use the schema from the connection
+        // Add the creation of the table in SQL
         let sqlCreateTableQuery = schema // Use the tables schema if it exists, else use the schema from the connection
             ? `CREATE TABLE "${schema}"."${currentTable.tableName}" (\n`
             : `CREATE TABLE ${currentTable.tableName} (\n`;
@@ -87,33 +100,13 @@ export const generateTableInfoFromTables = async (tables: Array<SqlTableWithSche
             sqlCreateTableQuery += `${currentColumn.columnName} ${currentColumn.dataType} ${currentColumn.isNullable ? "" : "NOT NULL"}`;
         }
         sqlCreateTableQuery += ") \n";
+
+        // Get sample data --leave the default of 3 rows. Research shows that performance goes down with more than 3 rows.
         let sqlSelectInfoQuery;
-        if (appDataSource.options.type === "mysql") {
-            // We use backticks to quote the table names and thus allow for example spaces in table names
-            sqlSelectInfoQuery = `SELECT * FROM \`${currentTable.tableName}\` LIMIT ${nbSampleRow};\n`;
-        }
-        else if (appDataSource.options.type === "postgres") {
-            const schema = appDataSource.options?.schema ?? "public";
-            sqlSelectInfoQuery = `SELECT * FROM "${schema}"."${currentTable.tableName}" LIMIT ${nbSampleRow};\n`;
-        }
-        else if (appDataSource.options.type === "mssql") {
-            const schema = currentTable.tableSchema ?? appDataSource.options?.schema; // Use the tables schema if it exists, else use the schema from the connection
-            sqlSelectInfoQuery = schema 
-                ? `SELECT TOP ${nbSampleRow} * FROM ${schema}.[${currentTable.tableName}];\n`
-                : `SELECT TOP ${nbSampleRow} * FROM [${currentTable.tableName}];\n`;
-        }
-        else if (appDataSource.options.type === "sap") {
-            const schema = appDataSource.options?.schema ??
-                appDataSource.options?.username ??
-                "public";
-            sqlSelectInfoQuery = `SELECT * FROM "${schema}"."${currentTable.tableName}" LIMIT ${nbSampleRow};\n`;
-        }
-        else if (appDataSource.options.type === "oracle") {
-            sqlSelectInfoQuery = `SELECT * FROM "${schema}"."${currentTable.tableName}" WHERE ROWNUM <= '${nbSampleRow}'`;
-        }
-        else {
-            sqlSelectInfoQuery = `SELECT * FROM "${currentTable.tableName}" LIMIT ${nbSampleRow};\n`;
-        }
+        schema = currentTable.tableSchema ?? appDataSource.options?.schema; // Use the tables schema if it exists, else use the schema from the connection
+        sqlSelectInfoQuery = schema 
+            ? `SELECT TOP ${nbSampleRow} * FROM ${schema}.[${currentTable.tableName}];\n`
+            : `SELECT TOP ${nbSampleRow} * FROM [${currentTable.tableName}];\n`;
         const columnNamesConcatString = `${currentTable.columns.reduce((completeString, column) => `${completeString} ${column.columnName}`, "")}\n`;
         let sample = "";
         try {
@@ -126,6 +119,7 @@ export const generateTableInfoFromTables = async (tables: Array<SqlTableWithSche
             // If the request fails we catch it and only display a log message
             console.log(error);
         }
+        
         globalString = globalString.concat(tableCustomDescription +
             sqlCreateTableQuery +
             sqlSelectInfoQuery +
@@ -146,21 +140,42 @@ export const verifyListTablesExistInDatabase = (tablesFromDatabase: Array<SqlTab
     }
 };
 
-export class MsSqlDatabase extends SqlDatabase {
+export const verifyIncludeTablesExistInDatabase = (tablesFromDatabase, includeTables) => {
+    verifyListTablesExistInDatabase(tablesFromDatabase, includeTables, "Include tables not found in database:");
+};
+export const verifyIgnoreTablesExistInDatabase = (tablesFromDatabase, ignoreTables) => {
+    verifyListTablesExistInDatabase(tablesFromDatabase, ignoreTables, "Ignore tables not found in database:");
+};
+
+export class MssqlDatabase extends SqlDatabase {
     public allTablesWithSchema: Array<SqlTableWithSchema> = [];
 
     constructor(fields: any) {
         super(fields);
     }
 
-    static async fromDataSourceParams(fields: SqlDatabaseDataSourceParams): Promise<SqlDatabase> {
-        let sqlDatabase: SqlDatabase = await super.fromDataSourceParams(fields);
-        let msSqlDatabase = sqlDatabase as MsSqlDatabase;
-        msSqlDatabase.allTablesWithSchema = await getTablesWithSchemaAndColumnsName(fields.appDataSource);
-        return sqlDatabase;
+    static async fromDataSourceParams(fields: SqlDatabaseDataSourceParams): Promise<MssqlDatabase> {
+        const mssqlDatabase: MssqlDatabase = new MssqlDatabase(fields);
+        
+        if (!mssqlDatabase.appDataSource.isInitialized) {
+            await mssqlDatabase.appDataSource.initialize();
+        }
+        // mssqlDatabase.allTables = await getTableAndColumnsName(sqlDatabase.appDataSource);
+        mssqlDatabase.allTablesWithSchema = await getTablesWithSchemaAndColumnsName(fields.appDataSource);
+
+        mssqlDatabase.customDescription = Object.fromEntries(Object.entries(fields?.customDescription ?? {}).filter(([key, _]) => mssqlDatabase.allTables
+            .map((table: SqlTable) => table.tableName)
+            .includes(key)));
+        verifyIncludeTablesExistInDatabase(mssqlDatabase.allTables, mssqlDatabase.includesTables);
+        verifyIgnoreTablesExistInDatabase(mssqlDatabase.allTables, mssqlDatabase.ignoreTables);
+        
+        return mssqlDatabase;
     }
 
-    override async getTableInfo(targetTables?: Array<string>): Promise<string> {
+    /**
+     * Dillon's override of the getTableInfo method.
+     */
+    public override async getTableInfo(targetTables?: Array<string>): Promise<string> {
         let selectedTables = this.includesTables.length > 0
             ? this.allTablesWithSchema.filter((currentTable) => this.includesTables.includes(currentTable.tableName))
             : this.allTablesWithSchema;
@@ -176,27 +191,29 @@ export class MsSqlDatabase extends SqlDatabase {
 }
 
 export class MsSqlToolkit extends SqlToolkit {
+    mssqlDb: MssqlDatabase;
+    
     constructor(db: SqlDatabase, llm: BaseLanguageModelInterface<any, BaseLanguageModelCallOptions> | undefined) {
         super(db, llm);
-        const msSqlDb = db as MsSqlDatabase;
+        this.mssqlDb = db as MssqlDatabase;
         super.dialect = 'mssql';
         super.tools = [
             new QuerySqlToolWithCleanup(db),
-            new InfoMsSqlTool(msSqlDb),
-            new ListTablesWithSchemaSqlTool(msSqlDb),
+            new InfoMssqlTool(this.mssqlDb),
+            new ListTablesWithSchemaSqlTool(this.mssqlDb),
             new MsSqlQueryCheckerTool({ llm }),
         ];
     }
 }
 
-export class InfoMsSqlTool extends InfoSqlTool {
-    public mssqlDb: MsSqlDatabase;
+export class InfoMssqlTool extends InfoSqlTool {
+    public mssqlDb: MssqlDatabase;
 
     static lc_name(): string {
-        return "InfoMsSqlTool";
+        return "InfoMssqlTool";
     }
 
-    constructor(db: MsSqlDatabase) {
+    constructor(db: MssqlDatabase) {
         super(db);
         this.mssqlDb = db;
         super.description =
@@ -296,13 +313,13 @@ export const getTablesWithSchemaAndColumnsName = async (appDataSource: any) => {
 }
 
 export class ListTablesWithSchemaSqlTool extends ListTablesSqlTool {
-    public mssqlDb: MsSqlDatabase;
+    public mssqlDb: MssqlDatabase;
     
     static lc_name() {
         return "ListTablesWithSchemaSqlTool";
     }
 
-    constructor(db: MsSqlDatabase) {
+    constructor(db: MssqlDatabase) {
         super(db);
         this.mssqlDb = db;
         super.description = "`Input is an empty string, output is a comma-separated list of tables in the database along with their schema (e.g. [dbo].[tablename], [dbo].[tablename2]).`";
@@ -325,78 +342,6 @@ export class ListTablesWithSchemaSqlTool extends ListTablesSqlTool {
         }
     }
 }
-
-// export class ResultFormatterTool extends Tool {
-//     name: string = "";
-//     template: string = "";
-//     llmChain: LLMChain;
-//     description: string = "";
-//
-//     static lc_name(): string {
-//         return "ResultFormatterTool";
-//     }
-//    
-//     constructor(llmChainOrOptions?: LLMChain | QueryCheckerToolArgs) {
-//         super();
-//         Object.defineProperty(this, "name", {
-//             enumerable: true,
-//             configurable: true,
-//             writable: true,
-//             value: "result-formatter"
-//         });
-//         Object.defineProperty(this, "template", {
-//             enumerable: true,
-//             configurable: true,
-//             writable: true,
-//             value: `
-//     {query}
-//    
-// Input to this tool is the final results from the query-sql tool.
-// Output is a nicely formatted result to give to the user.
-//
-// Use the following format in your response:
-// Question: the original question from the user
-// SQL Results: a nicely formatted markdown table containing the results from executing the query
-// SQL Query: the sql query that was generated
-// Query Explanation: an explanation of the query and why it was generated`
-//         });
-//         Object.defineProperty(this, "llmChain", {
-//             enumerable: true,
-//             configurable: true,
-//             writable: true,
-//             value: void 0
-//         });
-//         Object.defineProperty(this, "description", {
-//             enumerable: true,
-//             configurable: true,
-//             writable: true,
-//             value: `Use this tool to format the results from query-sql before giving them to the user.
-//     Always use this tool before responding to the user!`
-//         });
-//         if (typeof llmChainOrOptions?._chainType === "function") {
-//             this.llmChain = llmChainOrOptions;
-//         }
-//         else {
-//             const options = llmChainOrOptions;
-//             if (options?.llmChain !== undefined) {
-//                 this.llmChain = options.llmChain;
-//             }
-//             else {
-//                 const prompt = new PromptTemplate({
-//                     template: this.template,
-//                     inputVariables: ["query"],
-//                 });
-//                 const llm = options?.llm ?? new OpenAI({ temperature: 0 });
-//                 this.llmChain = new LLMChain({ llm, prompt });
-//             }
-//         }
-//     }
-//    
-//     /** @ignore */
-//     async _call(input: string) {
-//         return this.llmChain.predict({ query: input });
-//     }
-// }
 
 export const MSSQL_PREFIX = 
 `You are an agent designed to interact with a SQL database.
