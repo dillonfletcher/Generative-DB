@@ -63,27 +63,36 @@ export const generateTableInfoFromTables = async (tables: Array<SqlTableWithSche
             throw new Error("Only mssql is currently supported");
         }
 
-        // If a custom description is provided, use it, else get the description from the database
+        let tableAndColumnDescription: any;
+        try {
+            const tableAndColumnDescriptionQuery = `SELECT O.name [Table], c.name [Column], ep.value [Description], iif(ep.minor_id = 0, 'Table', 'Column') [Type]
+FROM sys.extended_properties EP
+LEFT JOIN sys.all_objects O ON ep.major_id = O.object_id
+LEFT JOIN sys.columns AS c ON ep.major_id = c.object_id AND ep.minor_id = c.column_id
+WHERE ep.[name] like 'MS_Description'
+AND ep.major_id = OBJECT_ID('${currentTable.tableSchema}.${currentTable.tableName}');`;
+
+            tableAndColumnDescription = await appDataSource.query(tableAndColumnDescriptionQuery);
+            // Check if the result is blank??
+            // tableCustomDescription = tableDescriptionResult.length > 0 ? `${tableDescriptionResult[0].value}\n` : "";
+        } catch (error) {
+            // tableCustomDescription = "";
+            // If the request fails we catch it and only display a log message
+            console.log(error);
+        }
+        
+        // If a custom description is provided, use it, else get the description from the database when available
         let tableCustomDescription;
         if (customDescription &&
             Object.keys(customDescription).includes(currentTable.tableName)) {
-            tableCustomDescription = `${customDescription[currentTable.tableName]}\n`
+            tableCustomDescription = `/* ${customDescription[currentTable.tableName]} */\n`
+        } else if (tableAndColumnDescription &&
+            tableAndColumnDescription.length > 0 &&
+            tableAndColumnDescription.some((row: any) => row.Type === "Table")) {
+            const tableDescription = tableAndColumnDescription.find((row: any) => row.Type === "Table").Description;
+            tableCustomDescription = `/* ${tableDescription} */\n`;
         } else {
-            try {
-                const sqlSelectTableDescriptionQuery = `SELECT value
-FROM sys.extended_properties
-WHERE [name] = 'MS_Description'
-AND minor_id = 0
-AND major_id = OBJECT_ID('${currentTable.tableSchema}.${currentTable.tableName}');`;
-                
-                let tableDescriptionResult = await appDataSource.query(sqlSelectTableDescriptionQuery);
-                // Check if the result is blank??
-                tableCustomDescription = tableDescriptionResult.length > 0 ? `${tableDescriptionResult[0].value}\n` : "";
-            } catch (error) {
-                tableCustomDescription = "";
-                // If the request fails we catch it and only display a log message
-                console.log(error);
-            }
+            tableCustomDescription = "";
         }
 
         // Generate create table query --studies show that the highest performance is obtained providing the tables in this format
@@ -95,11 +104,19 @@ AND major_id = OBJECT_ID('${currentTable.tableSchema}.${currentTable.tableName}'
             : `CREATE TABLE ${currentTable.tableName} (\n`;
         for (const [key, currentColumn] of currentTable.columns.entries()) {
             if (key > 0) {
-                sqlCreateTableQuery += ", ";
+                sqlCreateTableQuery += ", \n";
             }
+            
             sqlCreateTableQuery += `${currentColumn.columnName} ${currentColumn.dataType} ${currentColumn.isNullable ? "" : "NOT NULL"}`;
+            
+            if (tableAndColumnDescription &&
+                tableAndColumnDescription.length > 0 &&
+                tableAndColumnDescription.some((row: any) => row.Type === "Column" && row.Column === currentColumn.columnName)) {
+                const columnDescription = tableAndColumnDescription.find((row: any) => row.Type === "Column" && row.Column === currentColumn.columnName).Description;
+                sqlCreateTableQuery += ` /* ${columnDescription} */`;
+            }
         }
-        sqlCreateTableQuery += ") \n";
+        sqlCreateTableQuery += "\n) \n";
 
         // Get sample data --leave the default of 3 rows. Research shows that performance goes down with more than 3 rows.
         let sqlSelectInfoQuery;
@@ -124,7 +141,8 @@ AND major_id = OBJECT_ID('${currentTable.tableSchema}.${currentTable.tableName}'
             sqlCreateTableQuery +
             sqlSelectInfoQuery +
             columnNamesConcatString +
-            sample);
+            sample+
+            '\n');
     }
     return globalString;
 };
