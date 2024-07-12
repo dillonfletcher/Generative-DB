@@ -70,7 +70,7 @@ export abstract class Llm {
             password: password,
             database: catalog,
             options: {
-                encrypt: true,
+                encrypt: false,
                 connectTimeout: 30000,
             },
         };
@@ -110,13 +110,13 @@ dotenv.config({ path: __dirname + '/.env'});
 
 // noinspection JSIgnoredPromiseFromCall
 // Llm.RunModelAsync('What is the most sold product? How much has it sold?');
-// Llm.RunModelAsync('What client received the heaviest shipment in 2008?');
+Llm.RunModelAsync('What this each employees DOB?');
 // Llm.RunModelAsync("Are there any products that haven't sold? If so, what are they?");
 // Llm.RunModelAsync("What is the total number of products sold?");
 // Llm.RunModelAsync("What is the total amount of money earned from sales?");
 // Llm.RunModelAsync("Please give me all sales data that might be relevant to a presentation to decide which products we should discontinue selling.");
 
-Llm.RunModelAsync("Please give me all the useful information about customers, their orders, and the total order amount, along with some additional details. Please write the query using as many advanced SQL features as possible including CTEs, window functions, subqueries, and string functions.");
+// Llm.RunModelAsync("Please give me all the useful information about customers, their orders, and the total order amount, along with some additional details. Please write the query using as many advanced SQL features as possible including CTEs, window functions, subqueries, and string functions.");
 // Llm.RunModelAsync("Please give me a list of all orders that where shipped to shopping malls.");
 // Llm.RunModelAsync("Please me all useful order information for orders placed outside of the United States.");
 // Llm.RunModelAsync("Please give me all orders that include bicycle handlebars.");
