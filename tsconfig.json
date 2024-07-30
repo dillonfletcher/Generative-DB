@@ -4,7 +4,7 @@
 		"target": "es2019",
 		"outDir": "out",
 		"lib": [
-			"dom","es2019"
+			"dom","ESNext"
 		],
 		"sourceMap": true,
 		"rootDir": "src",

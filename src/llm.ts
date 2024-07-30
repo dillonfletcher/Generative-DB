@@ -110,7 +110,8 @@ dotenv.config({ path: __dirname + '/.env'});
 
 // noinspection JSIgnoredPromiseFromCall
 // Llm.RunModelAsync('What is the most sold product? How much has it sold?');
-Llm.RunModelAsync('What this each employees DOB?');
+// Llm.RunModelAsync('What this each employees DOB?');
+Llm.RunModelAsync('What are all the cool things and what is the name of the person that owns each one?');
 // Llm.RunModelAsync("Are there any products that haven't sold? If so, what are they?");
 // Llm.RunModelAsync("What is the total number of products sold?");
 // Llm.RunModelAsync("What is the total amount of money earned from sales?");

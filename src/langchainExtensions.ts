@@ -12,10 +12,23 @@ export interface MSSqlTable extends SqlTable{
     tableSchema: string;
     tableDescription?: string;
     columns: MSSqlColumn[];
+    constraints?: constraint[];
 }
 
 export interface MSSqlColumn extends SqlColumn{
     columnDescription?: string;
+}
+
+export interface constraint {
+    constraintName: string;
+    constraintType: "PRIMARY KEY" | "FOREIGN KEY" | "UNIQUE" | "CHECK" | "DEFAULT";
+    columnName: string;
+    referencedSchema?: string;
+    referencedTable?: string;
+    referencedColumn?: string;
+    checkClause?: string;
+    defaultValue?: string;
+    ordinalPosition?: number;
 }
 
 export class MssqlDatabase extends SqlDatabase {
@@ -33,7 +46,7 @@ export class MssqlDatabase extends SqlDatabase {
             await mssqlDatabase.appDataSource.initialize();
         }
         // mssqlDatabase.allTables = await getTableAndColumnsName(sqlDatabase.appDataSource);
-        mssqlDatabase.allTablesWithSchema = await getTablesColumnsAndDescriptions(fields.appDataSource);
+        mssqlDatabase.allTablesWithSchema = await getTablesColumnsConstraintsAndDescriptions(fields.appDataSource);
 
         mssqlDatabase.customDescription = Object.fromEntries(Object.entries(fields?.customDescription ?? {})
                                                                    .filter(([key, _]) => mssqlDatabase.allTablesWithSchema
@@ -69,7 +82,9 @@ export class MsSqlToolkit extends SqlToolkit {
     constructor(db: SqlDatabase, llm: BaseLanguageModelInterface<any, BaseLanguageModelCallOptions> | undefined) {
         super(db, llm);
         this.mssqlDb = db as MssqlDatabase;
+        // @ts-ignore
         super.dialect = 'mssql';
+        // @ts-ignore
         super.tools = [
             new QuerySqlToolWithCleanup(db),
             new InfoMssqlTool(this.mssqlDb),
@@ -128,12 +143,13 @@ export const generateTableInfoFromTables = async (tables: Array<MSSqlTable> | un
     let globalString = "";
     
     for (const currentTable of tables) {
+        // Check if the database is mssql if not throw an error because only mssql is as part of this project
         if (appDataSource.options.type !== "mssql") {
             throw new Error("Only mssql is currently supported");
         }
         
         // If a custom description is provided, use it, else get the description from the database when available
-        let tableCustomDescription = `/* ${currentTable.tableDescription} */\n` ?? "";
+        let tableCustomDescription = currentTable.tableDescription ? `/* ${currentTable.tableDescription} */\n` : "";
         if (customDescriptions &&
             Object.keys(customDescriptions).includes(currentTable.tableName)){
             tableCustomDescription = `/* ${customDescriptions[currentTable.tableName]} */\n`
@@ -143,22 +159,102 @@ export const generateTableInfoFromTables = async (tables: Array<MSSqlTable> | un
         let schema = currentTable.tableSchema ?? appDataSource.options?.schema; // Use the tables schema if it exists, else use the schema from the connection
         // Add the creation of the table in SQL
         let sqlCreateTableQuery = schema // Use the tables schema if it exists, else use the schema from the connection
-            ? `CREATE TABLE "${schema}"."${currentTable.tableName}" (\n`
-            : `CREATE TABLE ${currentTable.tableName} (\n`;
+            ? `CREATE TABLE [${schema}].[${currentTable.tableName}] (\n`
+            : `CREATE TABLE [${currentTable.tableName}] (\n`;
         for (const [key, currentColumn] of currentTable.columns.entries()) {
             if (key > 0) {
                 sqlCreateTableQuery += ", \n";
             }
             
-            sqlCreateTableQuery += `    ${currentColumn.columnName} ${currentColumn.dataType} ${currentColumn.isNullable ? "" : "NOT NULL"}`;
+            sqlCreateTableQuery += `\t${currentColumn.columnName} ${currentColumn.dataType} ${currentColumn.isNullable ? "" : "NOT NULL"}`;
+            
+            // Check if there are any constraints for the current column
+            if (currentTable.constraints &&
+                currentTable.constraints.some((constraint) => constraint.columnName === currentColumn.columnName)) {
+
+                // Get the constraints for the current column
+                const columnConstraints: constraint[] = currentTable.constraints.filter((constraint) => constraint.columnName === currentColumn.columnName);
+                
+                // Group constraints by type
+                const primaryKeys: constraint[] = columnConstraints.filter((constraint) => constraint.constraintType === "PRIMARY KEY");
+                const foreignKeys: constraint[] = columnConstraints.filter((constraint) => constraint.constraintType === "FOREIGN KEY");
+                const uniques: constraint[] = columnConstraints.filter((constraint) => constraint.constraintType === "UNIQUE");
+                const checks: constraint[] = columnConstraints.filter((constraint) => constraint.constraintType === "CHECK");
+                const defaults: constraint[] = columnConstraints.filter((constraint) => constraint.constraintType === "DEFAULT");
+
+                // Add the PK constraint to the column if there is only one --otherwise it is a composite key and will be added to the end of the table
+                if (primaryKeys.length === 1) {
+                    const pkConstraintName = primaryKeys[0].constraintName;
+                    const pkConstraintsWithSameName = currentTable.constraints
+                        .filter((constraint) => constraint.constraintType === "PRIMARY KEY" && constraint.constraintName === pkConstraintName);
+                    if (pkConstraintsWithSameName.length === 1) {
+                        sqlCreateTableQuery += `\n\t\tCONSTRAINT ${primaryKeys[0].constraintName} PRIMARY KEY`;
+                    }
+                }
+                
+                // Add the FK constraint to the column if there is only one with the same name --otherwise it is a composite key and will be added to the end of the table
+                const foreignKeysGrouped = Object.groupBy(foreignKeys, (item, index) => item.constraintName);
+                for (const [key, value] of Object.entries(foreignKeysGrouped)) {
+                    if (value && value.length === 1) {
+                        sqlCreateTableQuery += `\n\t\tCONSTRAINT ${value[0].constraintName} REFERENCES ${value[0].referencedSchema}.${value[0].referencedTable}(${value[0].referencedColumn})`;
+                    }
+                }
+                
+                // Add the unique constraint to the column if there is only one with the same name --otherwise it is a composite key and will be added to the end of the table
+                const uniquesGrouped = Object.groupBy(uniques, (item, index) => item.constraintName);
+                for (const [key, value] of Object.entries(uniquesGrouped)) {
+                    if (value && value.length === 1) {
+                        sqlCreateTableQuery += `\n\t\tCONSTRAINT ${value[0].constraintName} UNIQUE`;
+                    }
+                }
+                
+                // Add the check constraint to the column if it exists --check constraints do not have composite keys
+                if (checks.length === 1) {
+                    sqlCreateTableQuery += `\n\t\tCONSTRAINT ${checks[0].constraintName} CHECK (${checks[0].checkClause})`;
+                }
+
+                // Add the default constraint to the column if it exists --default constraints do not have composite keys
+                if (defaults.length === 1) {
+                    sqlCreateTableQuery += `\n\t\tCONSTRAINT ${defaults[0].constraintName} DEFAULT ${defaults[0].defaultValue}`;
+                }
+            }
             
             if (currentColumn.columnDescription) {
                 sqlCreateTableQuery += ` /* ${currentColumn.columnDescription} */`;
             }
         }
-        sqlCreateTableQuery += "\n) \n";
-
-        // TODO: WHY NOT EXPLICITLY ADD THE COLUMNS TO THE SELECT QUERY AND EXCLUDE BINARY AND IMAGE TYPE COLUMNS
+        
+        // Add the constraints to the end of the table if they are composite keys
+        if (currentTable.constraints) {
+            sqlCreateTableQuery += "\n";
+            
+            const primaryKeys: constraint[] = currentTable.constraints.filter((constraint) => constraint.constraintType === "PRIMARY KEY");
+            const foreignKeys: constraint[] = currentTable.constraints.filter((constraint) => constraint.constraintType === "FOREIGN KEY");
+            const uniques: constraint[] = currentTable.constraints.filter((constraint) => constraint.constraintType === "UNIQUE");
+            
+            // Add any composite PK --it is only possible to have one composite PK
+            if (primaryKeys.length > 1) {
+                sqlCreateTableQuery += `\n\tCONSTRAINT ${primaryKeys[0].constraintName} PRIMARY KEY (${primaryKeys.reduce((completeString, constraint) => `${completeString} ${constraint.columnName},`, "").slice(0, -1).trim()})`;
+            }
+            
+            // Add any composite FKs
+            const foreignKeysGrouped = Object.groupBy(foreignKeys, (item, index) => item.constraintName);
+            for (const [key, value] of Object.entries(foreignKeysGrouped)) {
+                if (value && value.length > 1) {
+                    sqlCreateTableQuery += `\n\tCONSTRAINT ${value[0].constraintName} FOREIGN KEY (${value.reduce((completeString, constraint) => `${completeString} ${constraint.columnName},`, "").slice(0, -1).trim()}) REFERENCES ${value[0].referencedSchema}.${value[0].referencedTable}(${value[0].referencedColumn})`;
+                }
+            }
+            
+            // Add any composite uniques
+            const uniquesGrouped = Object.groupBy(uniques, (item, index) => item.constraintName);
+            for (const [key, value] of Object.entries(uniquesGrouped)) {
+                if (value && value.length > 1) {
+                    sqlCreateTableQuery += `\n\tCONSTRAINT ${value[0].constraintName} UNIQUE (${value.reduce((completeString, constraint) => `${completeString} ${constraint.columnName},`, "").slice(0, -1).trim()})\n`;
+                }
+            }
+        }
+        
+        sqlCreateTableQuery += "\n)\n";
         
         // Get sample data --leave the default of 3 rows. Research shows that performance goes down with more than 3 rows.
         const typesToExclude = ["binary", "image"];
@@ -167,7 +263,7 @@ export const generateTableInfoFromTables = async (tables: Array<MSSqlTable> | un
 
         schema = currentTable.tableSchema ?? appDataSource.options?.schema; // Use the tables schema if it exists, else use the schema from the connection
         let sqlSelectInfoQuery = schema 
-            ? `SELECT TOP ${nbSampleRow}${infoColumnNamesConcatString}FROM ${schema}.[${currentTable.tableName}];\n`
+            ? `SELECT TOP ${nbSampleRow}${infoColumnNamesConcatString}FROM [${schema}].[${currentTable.tableName}];\n`
             : `SELECT TOP ${nbSampleRow}${infoColumnNamesConcatString}FROM [${currentTable.tableName}];\n`;
         
         const columnNamesConcatString = `${currentTable.columns.reduce((completeString, column) => `${completeString} ${column.columnName}`, "")}\n`;
@@ -230,6 +326,7 @@ export class InfoMssqlTool extends InfoSqlTool {
     constructor(db: MssqlDatabase) {
         super(db);
         this.mssqlDb = db;
+        // @ts-ignore
         super.description =
 `Input to this tool is a comma-separated list of qualified table names in the format schema.table, output is the schema and sample rows for those tables.
 Be sure that the tables actually exist by calling list-tables-sql first!
@@ -263,6 +360,7 @@ export class MsSqlQueryCheckerTool extends QueryCheckerTool {
 
     constructor(llmChainOrOptions?: LLMChain | QueryCheckerToolArgs) {
         super(llmChainOrOptions);
+        // @ts-ignore
         super.template = 
 `{query}
 
@@ -288,7 +386,7 @@ If there are any of the above mistakes, rewrite the query. If there are no mista
 
 
 // This function formats the raw results from the database to a list of tables and columns
-const formatToSqlTables = (tables: any[], columns: any[]): MSSqlTable[] => {
+const formatToSqlTables = (tables: any[], columns: any[], constraints: any[]): MSSqlTable[] => {
     const msSqlTables: MSSqlTable[] = [];
     
     for (const tableResult of tables) {
@@ -322,24 +420,62 @@ const formatToSqlTables = (tables: any[], columns: any[]): MSSqlTable[] => {
             // If the table is not found, create a new table and add the column --shouldn't happen
             const tableName: string = columnResult.table_name;
             const tableSchema: string = columnResult.table_schema;
-            const tableDescription: string = columnResult.description;
             const newTable: MSSqlTable = {
                 tableName: tableName,
                 tableSchema: tableSchema,
-                tableDescription: tableDescription,
                 columns: [newColumn],
             };
             msSqlTables.push(newTable);
         }
     }
     
+    for (const constraintResult of constraints) {
+        const newConstraint: constraint = {
+            constraintName: constraintResult.CONSTRAINT_NAME,
+            constraintType: constraintResult.ConstraintType as "PRIMARY KEY" | "FOREIGN KEY" | "UNIQUE" | "CHECK",
+            columnName: constraintResult.COLUMN_NAME,
+            referencedSchema: constraintResult.ReferencedSchema,
+            referencedTable: constraintResult.ReferencedTable,
+            referencedColumn: constraintResult.ReferencedColumn,
+            checkClause: constraintResult.CheckClause,
+            ordinalPosition: constraintResult.ORDINAL_POSITION
+        };
+        
+        // Find the table in the list of tables
+        const currentTable: MSSqlTable | undefined = msSqlTables.find((oneTable) =>
+                oneTable.tableName === constraintResult.TABLE_NAME && oneTable.tableSchema === constraintResult.TABLE_SCHEMA
+            );
+        if (currentTable) {
+            if (currentTable.constraints) {
+                currentTable.constraints.push(newConstraint);
+            }
+            else {
+                currentTable.constraints = [newConstraint];
+            }
+        }
+        else
+        {
+            // If the table is not found, create a new table and add the constraint --shouldn't happen
+            const tableName: string = constraintResult.TABLE_NAME;
+            const tableSchema: string = constraintResult.TABLE_SCHEMA;
+            const newTable: MSSqlTable = {
+                tableName: tableName,
+                tableSchema: tableSchema,
+                constraints: [newConstraint],
+                columns: [],
+            };
+            msSqlTables.push(newTable);
+        }
+    }
+        
     return msSqlTables;
 };
 
 // This function retrieves the tables and columns in the database along with their schema and descriptions
-export const getTablesColumnsAndDescriptions = async (appDataSource: any) => {
+export const getTablesColumnsConstraintsAndDescriptions = async (appDataSource: any) => {
     const schema = appDataSource.options?.schema;
     
+    // This query is used to get the tables in the database
     const tableSql = `SELECT
     t.TABLE_SCHEMA,
     t.TABLE_NAME,
@@ -356,6 +492,7 @@ FROM
     t.TABLE_NAME;`;
     const tablesQuery = appDataSource.query(tableSql);
     
+    // This query is used to get the columns in the database
     const columnSql: string = `SELECT
     c.TABLE_SCHEMA,
     c.TABLE_NAME,
@@ -376,9 +513,144 @@ FROM
     c.ORDINAL_POSITION;`
     const columnsQuery = appDataSource.query(columnSql);
     
-    const [tables, columns] = await Promise.all([tablesQuery, columnsQuery]);
+    // This query is used to get the constraints in the database
+    const constraintsSql: string = `WITH PrimaryKeys AS (
+    SELECT
+        'PRIMARY KEY' AS ConstraintType,
+        TC.TABLE_SCHEMA,
+        TC.TABLE_NAME,
+        TC.CONSTRAINT_NAME,
+        KCU.COLUMN_NAME,
+        NULL AS CheckClause,
+        NULL AS DefaultValue,
+        NULL AS ReferencedSchema,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        KCU.ORDINAL_POSITION
+    FROM
+        INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
+                 ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                     AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+                     AND TC.TABLE_NAME = KCU.TABLE_NAME
+    WHERE
+        TC.CONSTRAINT_TYPE = 'PRIMARY KEY'
+),
+ ForeignKeys AS (
+     SELECT
+         'FOREIGN KEY' AS ConstraintType,
+         TC.TABLE_SCHEMA AS FK_SCHEMA,
+         TC.TABLE_NAME AS FK_TABLE,
+         TC.CONSTRAINT_NAME AS FK_NAME,
+         KCU.COLUMN_NAME AS FK_COLUMN,
+         NULL AS CheckClause,
+         NULL AS DefaultValue,
+         RC.UNIQUE_CONSTRAINT_SCHEMA AS ReferencedSchema,
+         KCU2.TABLE_NAME AS ReferencedTable,
+         KCU2.COLUMN_NAME AS ReferencedColumn,
+         KCU.ORDINAL_POSITION
+     FROM
+         INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+             JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
+                  ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                      AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+                      AND TC.TABLE_NAME = KCU.TABLE_NAME
+             JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS RC
+                  ON TC.CONSTRAINT_NAME = RC.CONSTRAINT_NAME
+             JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU2
+                  ON RC.UNIQUE_CONSTRAINT_NAME = KCU2.CONSTRAINT_NAME
+                      AND RC.UNIQUE_CONSTRAINT_SCHEMA = KCU2.TABLE_SCHEMA
+     WHERE
+         TC.CONSTRAINT_TYPE = 'FOREIGN KEY'
+ ),
+ UniqueConstraints AS (
+     SELECT
+         'UNIQUE' AS ConstraintType,
+         TC.TABLE_SCHEMA,
+         TC.TABLE_NAME,
+         TC.CONSTRAINT_NAME,
+         KCU.COLUMN_NAME,
+         NULL AS CheckClause,
+         NULL AS DefaultValue,
+         NULL AS ReferencedSchema,
+         NULL AS ReferencedTable,
+         NULL AS ReferencedColumn,
+         KCU.ORDINAL_POSITION
+     FROM
+         INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+             JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
+                  ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                      AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+                      AND TC.TABLE_NAME = KCU.TABLE_NAME
+     WHERE
+         TC.CONSTRAINT_TYPE = 'UNIQUE'
+ ),
+ CheckConstraints AS (
+     SELECT
+         'CHECK' AS ConstraintType,
+         TC.TABLE_SCHEMA,
+         TC.TABLE_NAME,
+         CC.CONSTRAINT_NAME,
+         NULL AS COLUMN_NAME,
+         CC.CHECK_CLAUSE AS CheckClause,
+         NULL AS DefaultValue,
+         NULL AS ReferencedSchema,
+         NULL AS ReferencedTable,
+         NULL AS ReferencedColumn,
+         NULL AS ORDINAL_POSITION
+     FROM
+         INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+             JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS AS CC
+                  ON TC.CONSTRAINT_NAME = CC.CONSTRAINT_NAME
+                      AND TC.TABLE_SCHEMA = CC.CONSTRAINT_SCHEMA
+     WHERE
+         TC.CONSTRAINT_TYPE = 'CHECK'
+ ),
+ DefaultConstraints AS (
+     SELECT
+         'DEFAULT' AS ConstraintType,
+         SCHEMA_NAME(TC.schema_id) AS TABLE_SCHEMA,
+         T.NAME AS TABLE_NAME,
+         DC.NAME AS CONSTRAINT_NAME,
+         COL.NAME AS COLUMN_NAME,
+         NULL AS CheckClause,
+         DC.definition AS DefaultValue,
+         NULL AS ReferencedSchema,
+         NULL AS ReferencedTable,
+         NULL AS ReferencedColumn,
+         NULL AS ORDINAL_POSITION
+     FROM
+         sys.default_constraints AS DC
+             JOIN sys.tables AS T ON DC.parent_object_id = T.object_id
+             JOIN sys.columns AS COL ON DC.parent_column_id = COL.column_id AND DC.parent_object_id = COL.object_id
+             JOIN sys.schemas AS TC ON T.schema_id = TC.schema_id
+)
+SELECT *
+FROM PrimaryKeys
+UNION ALL
+SELECT *
+FROM ForeignKeys
+UNION ALL
+SELECT *
+FROM UniqueConstraints
+UNION ALL
+SELECT *
+FROM CheckConstraints
+UNION ALL
+SELECT *
+FROM DefaultConstraints\n` +
+(schema ? `WHERE TABLE_SCHEMA = '${schema}'\n` : '') +
+`ORDER BY
+    TABLE_SCHEMA,
+    TABLE_NAME,
+    ConstraintType,
+    CONSTRAINT_NAME,
+    ORDINAL_POSITION;`;
+    const constraintsQuery = appDataSource.query(constraintsSql);
     
-    return formatToSqlTables(tables, columns);
+    const [tables, columns, constraints] = await Promise.all([tablesQuery, columnsQuery, constraintsQuery]);
+    
+    return formatToSqlTables(tables, columns, constraints);
 }
 
 // This tool is used to list all tables in the database along with their schema
@@ -392,6 +664,7 @@ export class ListTablesWithSchemaSqlTool extends ListTablesSqlTool {
     constructor(db: MssqlDatabase) {
         super(db);
         this.mssqlDb = db;
+        // @ts-ignore
         super.description = "`Input is an empty string, output is a list of tables in the database, one per line, along with their schema and a description (e.g. [dbo].[Table1] --Description of table1).`";
     }
 
