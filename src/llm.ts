@@ -10,6 +10,7 @@ import {createSqlAgent } from "langchain/agents/toolkits/sql";
 import {ChatPromptTemplate} from "langchain/prompts";
 import {printOutput} from "./helpers";
 import {MSSQL_PREFIX, MssqlDatabase, MsSqlToolkit} from "./langchainExtensions";
+import {ProxyAgent} from "proxy-agent";
 
 export abstract class Llm {
     
@@ -19,11 +20,14 @@ export abstract class Llm {
         if (this._chatModel) {
             return this._chatModel;
         }
-
+        
         this._chatModel = new ChatOpenAI({
-            model: process.env.GPT_MODEL_VERSION ?? 'gpt-4o',
-            temperature: parseFloat(process.env.GPT_TEMPERATURE ?? '5'),
-        });
+                model: process.env.GPT_MODEL_VERSION ?? 'gpt-4o',
+                temperature: parseFloat(process.env.GPT_TEMPERATURE ?? '0'),
+            },
+            {
+                httpAgent: new ProxyAgent(),
+            });
 
         return this._chatModel;
     };
@@ -54,23 +58,32 @@ export abstract class Llm {
             return;
         }
         
-        printOutput('Getting completion from GPT...\n');
+        printOutput('Scanning Database...');
 
         // Convert the connectionInfo from SQL Data Studio to DataSourceOptions for our RAG chain
         const hostName = process.env.DB_HOSTNAME ?? 'localhost';
         const port = process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 1433;
+        const encryption = process.env.DB_ENCRYPTION ? process.env.DB_ENCRYPTION.toLowerCase() === 'true' : false;
         const username = process.env.DB_USERNAME ?? 'sa';
-        const password = process.env.DB_PASSWORD ?? undefined;
+        const password = process.env.DB_PASSWORD ?? "";
+        const domain = process.env.DB_DOMAIN ?? "";
         const catalog = process.env.DB_CATALOG ?? 'master';
         const sqlServerConnectionOptions: SqlServerConnectionOptions = {
             type: "mssql",
             host: hostName,
             port: port,
-            username: username,
-            password: password,
+            authentication: {
+                type: "ntlm",
+                options: {
+                    userName: username,
+                    password: password,
+                    domain: domain
+                }
+            },
             database: catalog,
             options: {
-                encrypt: false,
+                encrypt: encryption,
+                trustServerCertificate: true,
                 connectTimeout: 30000,
             },
         };
@@ -83,22 +96,35 @@ export abstract class Llm {
         // Create a database connection
         const db = await MssqlDatabase.fromDataSourceParams({
             appDataSource: datasource,
+            includesTables: [
+                "vAccTable",
+                "gl_relacc_table",
+                "vRelTable",
+                // "vAdvTable",
+                // "Branches",
+                "vRelPrimaryContacts"
+            ],
         });
 
-        // Create toolkit
-        const toolkit = new MsSqlToolkit(db, llm);
+        printOutput('..Complete\n');
+
+        // Create msSqlToolkit
+        const msSqlToolkit = new MsSqlToolkit(db, llm);
         
        // Create a SQL agent
         const sqlAgent = createSqlAgent(
             llm,
-            toolkit,
+            msSqlToolkit,
             { prefix: MSSQL_PREFIX }
-        )
+        );
         sqlAgent.lc_kwargs = { return_intermediate_steps: true }; // Don't just return the answer, also return the intermediate steps
         sqlAgent.maxIterations = 15; // Set max iterations to limit cost
-        
+
+        printOutput('Invoking Agent...');
         let response= await sqlAgent.invoke({ input: userInput.query }, { });
-       
+        printOutput('...Complete\n');
+
+
         printOutput(`====GPT COMPLETION====\n${response.intermediateSteps.slice(-1)[0].observation}\n`);
 
         // printOutput('SQL query sent to editor.\n');
@@ -108,16 +134,4 @@ export abstract class Llm {
 
 dotenv.config({ path: __dirname + '/.env'});
 
-// noinspection JSIgnoredPromiseFromCall
-// Llm.RunModelAsync('What is the most sold product? How much has it sold?');
-// Llm.RunModelAsync('What this each employees DOB?');
-Llm.RunModelAsync('What are all the cool things and what is the name of the person that owns each one?');
-// Llm.RunModelAsync("Are there any products that haven't sold? If so, what are they?");
-// Llm.RunModelAsync("What is the total number of products sold?");
-// Llm.RunModelAsync("What is the total amount of money earned from sales?");
-// Llm.RunModelAsync("Please give me all sales data that might be relevant to a presentation to decide which products we should discontinue selling.");
-
-// Llm.RunModelAsync("Please give me all the useful information about customers, their orders, and the total order amount, along with some additional details. Please write the query using as many advanced SQL features as possible including CTEs, window functions, subqueries, and string functions.");
-// Llm.RunModelAsync("Please give me a list of all orders that where shipped to shopping malls.");
-// Llm.RunModelAsync("Please me all useful order information for orders placed outside of the United States.");
-// Llm.RunModelAsync("Please give me all orders that include bicycle handlebars.");
+Llm.RunModelAsync("Which relationships have a value of over 5000000?");

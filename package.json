@@ -25,7 +25,8 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "mkdir -p ./out | tsc -p ./ | cp ./.env ./out/.env",
+		"compile": "mkdir -p ./out && tsc -p ./ && cp ./.env ./out/.env",
+		"compile-windows": "(if not exist .\\out mkdir .\\out) && tsc -p .\\ & copy /Y .\\.env .\\out\\.env",
 		"lint": "eslint src --ext ts",
 		"watch": "tsc -watch -p ./",
 		"pretest": "npm run compile && npm run lint",
@@ -34,10 +35,11 @@
 	},
 	"devDependencies": {
 		"@types/azdata": "^1.46.6",
+		"@types/debug": "^4.1.12",
 		"@types/glob": "^7.2.0",
 		"@types/json2md": "^1.5.4",
 		"@types/mocha": "^9.1.1",
-		"@types/node": "^13.13.52",
+		"@types/node": "^22.0.0",
 		"@types/vscode": "^1.91.0",
 		"@typescript-eslint/eslint-plugin": "^2.34.0",
 		"@typescript-eslint/parser": "^2.34.0",
@@ -48,11 +50,13 @@
 		"typescript": "^5.5.4"
 	},
 	"dependencies": {
+		"debug": "^4.3.6",
 		"dotenv": "^16.4.5",
 		"json2md": "^2.0.1",
 		"langchain": "^0.1.37",
 		"mssql": "^10.0.4",
 		"openai": "^4.53.2",
+		"proxy-agent": "^6.4.0",
 		"typeorm": "^0.3.20"
 	}
 }

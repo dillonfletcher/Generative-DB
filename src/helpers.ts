@@ -1,14 +1,24 @@
 // import vscode from "vscode";
 //
 // let _outputChannel: vscode.OutputChannel; // Output channel
+import debug from "debug";
+
+const generativeDBOutput = debug('generative-db:log');
+const generativeDBDebug = debug('generative-db:debug');
 
 export const printOutput = (message: string) => {
     // const outputChannel = getOutputChannel();
     // outputChannel?.appendLine(message);
     //
-    if (process.env.DEBUG) {
-        console.log(message);
-    }
+    console.log(message);
+    generativeDBOutput(message);
+};
+
+export const printDebug = (message: string) => {
+    // const outputChannel = getOutputChannel();
+    // outputChannel?.appendLine(message);
+    //
+    generativeDBDebug(message);
 };
 
 export const getOutputChannel = ():  undefined => {
