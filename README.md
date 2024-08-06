@@ -10,7 +10,7 @@
 3) To  configure the tool create a .env file in the root of the project with the following content:
     ```
    # .env
-   DEBUG=true
+   DEBUG=*
    
    #Database Settings
    DB_HOSTNAME=""
@@ -18,7 +18,8 @@
    DB_USERNAME=""
    DB_PASSWORD=""
    DB_CATALOG=""
-   
+   DB_DOMAIN="ac.lp.acml.com";
+
    # Assistant Settings
    GPT_MODEL_VERSION="gpt-3.5-turbo-0125"
    GPT_TEMPERATURE=0
@@ -27,9 +28,9 @@
    OPENAI_API_KEY=""
    
    # To use with Azure you should have AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_INSTANCE_NAME, AZURE_OPENAI_API_DEPLOYMENT_NAME
-   # and AZURE_OPENAI_API_VERSION environment variable set.AZURE_OPENAI_BASE_PATH is optional and will override AZURE_OPENAI_API_INSTANCE_NAME
+   # and AZURE_OPENAI_API_VERSION environment variable set.AZURE_OPENAI_BASE_PATH is optional and will override
+   # AZURE_OPENAI_API_INSTANCE_NAME
    # AZURE_OPENAI_API_KEY=
-   # AZURE_OPENAI_API_INSTANCE_NAME=
    # AZURE_OPENAI_API_DEPLOYMENT_NAME=
    # AZURE_OPENAI_API_VERSION=
    # AZURE_OPENAI_BASE_PATH=
